@@ -1,0 +1,193 @@
+---
+title: Scraping data from GapMinder and NYT websites
+output: html_document
+urlcolor: blue
+---
+Data Wrangling and Scraping
+========================================================
+
+```{r setup, include=FALSE}
+#DON'T MODIFY THIS CHUNK!
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, tidy = TRUE, tidy.opts=list(width.cutoff=50))
+```
+
+```{r}
+#Put all necessary libraries here
+library(httr)
+library(tidyr)
+library(googlesheets)
+library(dplyr)
+library(ggplot2)
+library(rvest)
+library(stringr)
+```
+
+In this document, we will practice changing the structure of our dataset using the `tidyr` package, cleaning data, and scraping data from the web.
+
+Let's grab data from the GapMinder website.  As mentioned in 'Modern Data Science with R' book, this can be done via the `googlesheets` package since the data are stored on the GapMinder website in Google Sheets.
+
+```{r, eval = TRUE}
+library(googlesheets)
+key1 <- "1kWH_xdJDM4SMfT_Kzpkk-1yuxWChfurZuWYjfmv51EA"
+gap1 <- gs_key(x = key1, lookup = FALSE) %>%
+  gs_read(ws = "Data")
+gap1
+```
+
+*********************************************************************************
+
+The code scrapes the data frame containing the names of countries and the estimated HIV prevalence percetage among the people aged 15-49 in those respective countries from the year 1979 to 2011.  
+
+*********************************************************************************
+
+Let's wrangle the data so that we only have data from 2000 onwards, all rows with NAs are removed, and the data is *tidy*.  Additionally, let's use the `rename` function to give a more suitable name to the column entitled `Estimated HIV Prevalence% - (Ages 15-49)`.
+
+```{r, eval = TRUE}
+#Hint: The following may be helpful
+library(googlesheets)
+key1 <- "1kWH_xdJDM4SMfT_Kzpkk-1yuxWChfurZuWYjfmv51EA"
+gap1 <- gs_key(x = key1, lookup = FALSE) %>%
+  gs_read(ws = "Data") %>%
+  select(1, contains("20")) %>%
+  na.omit() %>%
+  rename("Country" = "Estimated HIV Prevalence% - (Ages 15-49)" ) %>%
+  gather(key = "Year", value = "Estimated_HIV_Preval_Percent", starts_with("20"))
+  
+gap1
+```
+
+Repeat the above process to create a new dataset based on the following key:
+
+```{r, eval = TRUE}
+key2 <- "1RctTQmKB0hzbm1E8rGcufYdMshRdhmYdeL29nXqmvsc"
+gap2 <- gs_key(x = key2, lookup = FALSE) %>%
+  gs_read(ws = "Data") %>%
+  select(1, contains("20")) %>%
+  na.omit() %>%
+  rename("Country" = "Income per person (fixed 2000 US$)" ) %>%
+  gather(key = "Year", value = "Income_per_person", starts_with("20"))
+
+gap2
+
+```
+
+Let's join the two datasets.  Only keeping the rows where the observational unit is in both datasets.
+
+```{r}
+big_gap1 <- inner_join(gap1, gap2)
+big_gap1
+```
+
+
+```{r, fig.width = 10, fig.height = 6}
+big_gap <- big_gap1 %>%
+  arrange(Income_per_person) %>%
+  head(100) %>%
+  select(Country, Estimated_HIV_Preval_Percent, Income_per_person)
+big_gap
+
+colors = c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#17becf", 
+           "#e377c2", "#9467bd", "#aec7e8", "#bcbd22", "#052050",  
+           "#98df8a", "#ff9896", "#8c564b", "#c49c94", 
+           "#7f7f7f")
+hiv_plot <- ggplot(big_gap, aes(x = Income_per_person, y = Estimated_HIV_Preval_Percent)) +
+              geom_point(aes(col = Country)) +
+              scale_colour_manual(values = colors) +
+              labs(title = "Does an increase in income have an impact in the HIV % in the countries with lowest income?",
+                   x = "income per person",
+                   y = "estimated HIV percentage among people aged 18-49")
+hiv_plot
+```
+
+Here I selected the top 100 rows arranged by the lowest income in ascending order. From the plot, we can see that in a few lowest income countries the estimated HIV percentage among people aged 18-49 decreased as the income increased- for example: Malawi, Burundi and the Central African Republic. However, in some of the countries the increase in income did not really have any impact on the estimated HIV percentage. For instance, although Eritea's income per person increased by almost 50%, it had almost no effect on the estimated HIV infected population. Same was the case with Guinea_Bissau, Niger, Sierra Leone, Chad, etc. 
+
+Let's scrape data from (https://www.nytimes.com/interactive/2017/05/25/sunday-review/opinion-pell-table.html) and create some informative graphics. Using `rvest`, let's extract the table with the css method.
+
+```{r}
+url <- "https://www.nytimes.com/interactive/2017/05/25/sunday-review/opinion-pell-table.html"
+table <- url %>%
+  read_html() %>%
+  html_node(css = ".table") %>%
+  html_table()
+head(table, 25)
+```
+
+
+2.b Fix the names of the columns so that they don't have any spaces.  (You can also shorten the names.)
+
+```{r}
+#Utilize colnames
+colnames(table) <- c("rank", "college", "freshman_class_size", "pell_grad_share_in_percent", "net_price", "college_access_index", "endowment_per_student")
+head(table, 25)
+```
+
+Let's now clean the entries in the columns. 
+
+* Remove commas, $'s, and other extraneous characters.
+* Make sure each variable has the correct class.
+* For `Net price, mid. income`, use dollars in thousands as the scale.
+* For `Endowment per student` use dollars in thousands per student as the scale.
+
+```{r}
+table2 <- table %>%
+  mutate(freshman_class_size = as.numeric(gsub(",", "", freshman_class_size))) %>%
+  mutate(net_price_in_thousands = net_price) %>%
+  mutate(net_price_in_thousands = as.numeric(gsub("[$k]", "", net_price_in_thousands))) %>%
+  mutate(endowment_per_student_in_thousands = endowment_per_student) %>%
+  mutate(endowment_per_student_in_thousands = as.numeric(gsub("[$|k|m]", "", endowment_per_student_in_thousands))) %>%
+  mutate(endowment_per_student_in_thousands = if_else(str_detect(endowment_per_student, "m"), endowment_per_student_in_thousands*1000, endowment_per_student_in_thousands))
+  
+head(table2, 25)
+```
+
+Let's create a plot that contains log of endowment per student, the college access index, and the log of the freshman size.  
+
+```{r, fig.width = 10, fig.height = 6}
+plot1 <- table2 
+ggplot(plot1, aes(log10(endowment_per_student_in_thousands), college_access_index)) +
+  geom_point(col = "darkorange1",
+             alpha = 0.6,
+             aes(size = log10(freshman_class_size))) +
+  labs(title = "Scatter Plot ",
+       subtitle = "Relationship Between Endowment, College Access Index and Freshman Class Size",
+       x = "log of endowment per student in thousands ($)",
+       y = "college access index",
+       caption = "Source: GapMinder",
+       size = "log of freshman class size")
+
+```
+
+Let's label Haverford, Bryn Mawr and Swarthmore on our plot.  
+
+```{r, fig.width = 10, fig.height = 6}
+plot2 <- table2
+tri_co <- plot2[plot2$college %in% c("Swarthmore College", "Haverford College", "Bryn Mawr College"), ]
+ggplot(plot1, aes(log10(endowment_per_student_in_thousands), college_access_index)) +
+  geom_point(col = "darkorange1",
+             alpha = 0.6,
+             aes(size = log10(freshman_class_size))) +
+  geom_point(data = tri_co,
+             aes(log10(endowment_per_student_in_thousands), college_access_index),
+             color = "black") +
+  geom_text(data = tri_co, aes(label = college )) +
+  labs(title = "Scatter Plot ",
+       subtitle = "Relationship Between Endowment, College Access Index and Freshman Class Size",
+       x = "log of endowment per student in thousands ($)",
+       y = "college access index",
+       caption = "Source: GapMinder",
+       size = "log of freshman class size")
+
+
+
+```
+
+Read over the NYT article to understand the college access index
+
+*********************************************************************************
+
+An index value of 1 is average. A value higher than 1 suggests a greater commitment to economic diversity. From the above plot, we can see on the top left that there are a number of colleges with low endowment per student but with a larger commitment to economic diversity and a larger freshman class size. Similar trends can be observed on the top right of the plot, where there are a number of colleges with endowment per students in hundreds of thousands (and even over a million in some cases) and above-average commitment to economic diversity. However, if we glance at the middle of the plot, we can observe that there are a large number of colleges with both small and large freshman class size and an average endowment per student but with a below-average college access index. Only colleges that are untra-rich and the colleges in the UC system seem to be doing their part to increase economic diversity among students on their college campuses. 
+
+Among the tri-co colleges, Swarthmore stands out with a college access index of around 1.25. Haverford is just above average and Bryn Mawr's commitment to economic diversity is disappointing. With an endowment per student equalling almost half a million dollars and a freshman class of 400, the college is clearly not doing enough to increase economic diversity among its campus. Similarly, with an endowment per student equalling well over a million dollars, Swarthmore's effort to increase the economic diversity among its students is discouraging compared to its peers- Amherst, Williams and Wellesley, which are ranked in the top 15 in the nation compared to Swarthmore which is ranked 41. 
+
+*********************************************************************************
+
