@@ -1,0 +1,1 @@
+We will grab data from the GapMinder and NYT websites to practice web scraping and data wrangling. We will also scrape the data frame containing the names of countries and the estimated HIV prevalence percetage among the people aged 15-49 in those respective countries from the year 1979 to 2011. 
